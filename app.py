@@ -13,7 +13,7 @@ def index():
 def live_prices():
     """Get live prices for top cryptocurrencies"""
     try:
-        symbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT']
+        symbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'TRXUSDT']
         prices = {}
         
         # Add headers to avoid geo-blocking

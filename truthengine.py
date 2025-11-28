@@ -137,6 +137,20 @@ def add_technical_indicators(df):
     df['bb_std'] = df['close'].rolling(window=20).std()
     df['bb_upper'] = df['bb_mid'] + (df['bb_std'] * 2)
     df['bb_lower'] = df['bb_mid'] - (df['bb_std'] * 2)
+
+    # ATR (Average True Range)
+    high_low = df['high'] - df['low']
+    high_close = np.abs(df['high'] - df['close'].shift())
+    low_close = np.abs(df['low'] - df['close'].shift())
+    ranges = pd.concat([high_low, high_close, low_close], axis=1)
+    true_range = np.max(ranges, axis=1)
+    df['atr'] = true_range.rolling(window=14).mean()
+
+    # Stochastic Oscillator
+    low_min = df['low'].rolling(window=14).min()
+    high_max = df['high'].rolling(window=14).max()
+    df['stoch_k'] = 100 * ((df['close'] - low_min) / (high_max - low_min))
+    df['stoch_d'] = df['stoch_k'].rolling(window=3).mean()
     
     # Fill NaNs from rolling windows
     df.bfill(inplace=True)
@@ -244,6 +258,9 @@ def build_dataset_from_klines(df, seq_len, horizon_steps):
     macd_sig = df['macd_signal'].values
     bb_up = df['bb_upper'].values
     bb_low = df['bb_lower'].values
+    atr = df['atr'].values
+    stoch_k = df['stoch_k'].values
+    stoch_d = df['stoch_d'].values
 
     N = len(closes)
     max_i = N - horizon_steps
@@ -278,10 +295,16 @@ def build_dataset_from_klines(df, seq_len, horizon_steps):
         # Distance to BB bands normalized by price
         dist_bb_up = float((bb_up[idx] - last) / last)
         dist_bb_low = float((last - bb_low[idx]) / last)
+        
+        # New indicators
+        curr_atr = float(atr[idx] / last) # Normalize ATR by price
+        curr_stoch_k = float(stoch_k[idx])
+        curr_stoch_d = float(stoch_d[idx])
 
         X_list.append([
             last, mean, std, slope, momentum, vmean, ret, 
-            curr_rsi, curr_macd, curr_macd_sig, dist_bb_up, dist_bb_low
+            curr_rsi, curr_macd, curr_macd_sig, dist_bb_up, dist_bb_low,
+            curr_atr, curr_stoch_k, curr_stoch_d
         ])
         Y_list.append(float(closes[i + horizon_steps - 1]))
         sample_times.append(df["close_time"].iloc[i])
@@ -418,13 +441,18 @@ def get_prediction(symbol_input, target_input):
     last_macd_sig = float(df_with_ind.at[last_idx, 'macd_signal'])
     last_bb_up = float(df_with_ind.at[last_idx, 'bb_upper'])
     last_bb_low = float(df_with_ind.at[last_idx, 'bb_lower'])
+    last_atr = float(df_with_ind.at[last_idx, 'atr'])
+    last_stoch_k = float(df_with_ind.at[last_idx, 'stoch_k'])
+    last_stoch_d = float(df_with_ind.at[last_idx, 'stoch_d'])
     
     dist_bb_up = float((last_bb_up - last_last) / last_last)
     dist_bb_low = float((last_last - last_bb_low) / last_last)
+    curr_atr = float(last_atr / last_last)
     
     feat = np.array([
         last_last, last_mean, last_std, last_slope, last_momentum, last_vmean, last_ret,
-        last_rsi, last_macd, last_macd_sig, dist_bb_up, dist_bb_low
+        last_rsi, last_macd, last_macd_sig, dist_bb_up, dist_bb_low,
+        curr_atr, last_stoch_k, last_stoch_d
     ], dtype=float)
     
     # Scale inference features
@@ -434,7 +462,7 @@ def get_prediction(symbol_input, target_input):
     last_price = float(last_last)
     pct = (forecast_val / last_price - 1.0) * 100.0
     
-    feature_names = ["last","mean","std","slope","momentum","vol_mean","ret", "rsi", "macd", "macd_sig", "dist_bb_up", "dist_bb_low"]
+    feature_names = ["last","mean","std","slope","momentum","vol_mean","ret", "rsi", "macd", "macd_sig", "dist_bb_up", "dist_bb_low", "atr", "stoch_k", "stoch_d"]
     beta_dict = {name: float(coef) for name, coef in zip(feature_names, b)}
 
     return {
