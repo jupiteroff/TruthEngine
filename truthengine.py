@@ -151,27 +151,63 @@ def fetch_klines(symbol, interval, required_candles):
     Fetch 'required_candles' most recent candles for symbol@interval.
     Returns dataframe with columns: open_time, open, high, low, close, volume, close_time
     """
+    # Add headers to avoid geo-blocking
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/json'
+    }
+    
     limit = min(MAX_PER_REQUEST, required_candles)
     params = {"symbol": symbol, "interval": interval, "limit": limit}
-    resp = requests.get(BINANCE_REST, params=params, timeout=15)
-    resp.raise_for_status()
-    data = resp.json()
-    candles = data
+    
+    # Try Binance US endpoint first (less restrictions)
+    urls = [
+        "https://api.binance.us/api/v3/klines",
+        "https://api.binance.com/api/v3/klines",
+        "https://api1.binance.com/api/v3/klines",
+        "https://api2.binance.com/api/v3/klines",
+        "https://api3.binance.com/api/v3/klines"
+    ]
+    
+    candles = None
+    last_error = None
+    
+    for url in urls:
+        try:
+            resp = requests.get(url, params=params, headers=headers, timeout=15)
+            resp.raise_for_status()
+            candles = resp.json()
+            break  # Success, exit loop
+        except Exception as e:
+            last_error = e
+            continue  # Try next URL
+    
+    if candles is None:
+        raise RuntimeError(f"All Binance endpoints failed. Last error: {last_error}")
+    
     # if need more than limit, fetch earlier batches using startTime
     while len(candles) < required_candles:
         # earliest openTime in current candles
         earliest = int(candles[0][0])
         # request previous batch ending before earliest
-        params = {"symbol": symbol, "interval": interval, "endTime": earliest - 1, "limit": limit}
-        resp = requests.get(BINANCE_REST, params=params, timeout=15)
-        resp.raise_for_status()
-        batch = resp.json()
+        params_batch = {" symbol": symbol, "interval": interval, "endTime": earliest - 1, "limit": limit}
+        
+        for url in urls:
+            try:
+                resp = requests.get(url, params=params_batch, headers=headers, timeout=15)
+                resp.raise_for_status()
+                batch = resp.json()
+                if batch:
+                    candles = batch + candles
+                break
+            except:
+                continue
+        
         if not batch:
             break
-        # prepend
-        candles = batch + candles
         # safety sleep to avoid rate limit
         time.sleep(0.15)
+        
     # trim to required_candles (keep most recent)
     candles = candles[-required_candles:]
     # build DataFrame
