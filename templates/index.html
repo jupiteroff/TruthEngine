@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TruthEngine | AI Crypto Predictor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">TRUTH<span>ENGINE</span></div>
+            <p class="subtitle">MALP v11 // Enhanced Precision Model</p>
+        </header>
+
+        <main>
+            <div class="card input-card">
+                <form id="predictForm">
+                    <div class="form-group">
+                        <label for="symbol">Asset Symbol</label>
+                        <input type="text" id="symbol" placeholder="e.g. BTC, ETH, SOL" required autocomplete="off">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="target">Prediction Target</label>
+                        <input type="text" id="target" placeholder="e.g. 5m, 1h, 4h" required autocomplete="off">
+                    </div>
+
+                    <button type="submit" id="submitBtn">
+                        <span class="btn-text">Generate Forecast</span>
+                        <div class="loader"></div>
+                    </button>
+                </form>
+            </div>
+
+            <div id="resultSection" class="hidden">
+                <div class="card result-card">
+                    <div class="result-header">
+                        <div class="asset-info">
+                            <h2 id="resSymbol">BTCUSDT</h2>
+                            <span id="resTargetTime">Target: 2025-11-28 12:00 UTC</span>
+                        </div>
+                        <div class="confidence-badge" id="confidenceBadge">
+                            Test CCC: <span id="resTestCCC">0.00</span>
+                        </div>
+                    </div>
+
+                    <div class="price-display">
+                        <div class="current-price-box">
+                            <span class="label">Current Price</span>
+                            <span class="value" id="resLastPrice">0.00</span>
+                        </div>
+                        <div class="arrow">→</div>
+                        <div class="forecast-price-box">
+                            <span class="label">Forecast</span>
+                            <span class="value" id="resForecast">0.00</span>
+                            <span class="pct" id="resPct">0.00%</span>
+                        </div>
+                    </div>
+
+                    <div class="details-grid">
+                        <div class="detail-item">
+                            <span class="label">Train CCC</span>
+                            <span class="value" id="resTrainCCC">0.00</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="label">Alpha</span>
+                            <span class="value" id="resAlpha">0.00</span>
+                        </div>
+                        <div class="detail-item">
+                            <span class="label">Interval</span>
+                            <span class="value" id="resInterval">1m</span>
+                        </div>
+                    </div>
+
+                    <div class="factors-section">
+                        <h3>Key Drivers (Beta Coefficients)</h3>
+                        <div class="factors-grid" id="factorsGrid">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    <script src="/static/script.js"></script>
+</body>
+</html>
