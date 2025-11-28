@@ -29,7 +29,7 @@ from scipy.optimize import minimize
 # Config / defaults
 # ---------------------------
 BINANCE_REST = "https://api.binance.com/api/v3/klines"
-SAMPLES = 800            # Increased samples for better training with more features
+SAMPLES = 2000            # Increased samples for better training with more features
 SEQ_LEN = 30             # window length in candles for features
 MAX_PER_REQUEST = 1000   # Binance max limit per request
 OUTPUT_TRAIN_CSV = "malp_v11_train.csv"
@@ -151,6 +151,57 @@ def add_technical_indicators(df):
     high_max = df['high'].rolling(window=14).max()
     df['stoch_k'] = 100 * ((df['close'] - low_min) / (high_max - low_min))
     df['stoch_d'] = df['stoch_k'].rolling(window=3).mean()
+
+    # VWAP (Rolling 50)
+    tp = (df['high'] + df['low'] + df['close']) / 3
+    df['vwap'] = (tp * df['volume']).rolling(window=50).sum() / df['volume'].rolling(window=50).sum()
+
+    # ADX (14)
+    plus_dm = df['high'].diff()
+    minus_dm = df['low'].diff()
+    plus_dm = np.where((plus_dm > minus_dm) & (plus_dm > 0), plus_dm, 0.0)
+    minus_dm = np.where((minus_dm > plus_dm) & (minus_dm > 0), -minus_dm, 0.0)
+    
+    tr14 = df['atr'] # We already have ATR, which is smoothed TR. Actually ATR is SMA of TR.
+    # ADX usually uses Wilder's smoothing, but SMA is close enough for ML features.
+    # Let's use the rolling sum for DM to match the window of ATR if we treat ATR as the denominator
+    # Standard ADX:
+    # +DI = 100 * Smoothed(+DM) / ATR
+    # -DI = 100 * Smoothed(-DM) / ATR
+    # DX = 100 * |+DI - -DI| / (+DI + -DI)
+    # ADX = Smoothed(DX)
+    
+    # Using simple rolling mean for smoothing to keep it fast and robust
+    p_dm_smooth = pd.Series(plus_dm, index=df.index).rolling(window=14).mean()
+    m_dm_smooth = pd.Series(minus_dm, index=df.index).rolling(window=14).mean()
+    
+    # Avoid division by zero
+    atr_safe = df['atr'].replace(0, 1)
+    
+    plus_di = 100 * (p_dm_smooth / atr_safe)
+    minus_di = 100 * (m_dm_smooth / atr_safe)
+    
+    dx = 100 * np.abs(plus_di - minus_di) / (plus_di + minus_di).replace(0, 1)
+    df['adx'] = dx.rolling(window=14).mean()
+
+    # Macro Trend (Synthetic Multi-timeframe)
+    # We'll use a long-period slope as a proxy for higher timeframe trend
+    # e.g., if current is 1m, 60m trend is approx 60-period slope.
+    # Let's use a 100-period Linear Regression Slope
+    # Normalized by price to make it comparable
+    
+    def calc_slope(series):
+        y = series.values
+        x = np.arange(len(y))
+        if len(y) < 2: return 0.0
+        # simple linear regression slope
+        return np.polyfit(x, y, 1)[0]
+    
+    # Rolling slope is slow with apply. Let's use a simpler momentum proxy for macro:
+    # EMA(50) - EMA(200) (Golden Cross logic)
+    ema50 = df['close'].ewm(span=50, adjust=False).mean()
+    ema200 = df['close'].ewm(span=200, adjust=False).mean()
+    df['macro_trend'] = (ema50 - ema200) / ema200 # Normalized difference
     
     # Fill NaNs from rolling windows
     df.bfill(inplace=True)
@@ -204,8 +255,9 @@ def fetch_klines(symbol, interval, required_candles):
         # earliest openTime in current candles
         earliest = int(candles[0][0])
         # request previous batch ending before earliest
-        params_batch = {" symbol": symbol, "interval": interval, "endTime": earliest - 1, "limit": limit}
+        params_batch = {"symbol": symbol, "interval": interval, "endTime": earliest - 1, "limit": limit}
         
+        batch = None
         for url in urls:
             try:
                 resp = requests.get(url, params=params_batch, headers=headers, timeout=15)
@@ -258,9 +310,14 @@ def build_dataset_from_klines(df, seq_len, horizon_steps):
     macd_sig = df['macd_signal'].values
     bb_up = df['bb_upper'].values
     bb_low = df['bb_lower'].values
+    bb_up = df['bb_upper'].values
+    bb_low = df['bb_lower'].values
     atr = df['atr'].values
     stoch_k = df['stoch_k'].values
     stoch_d = df['stoch_d'].values
+    vwap = df['vwap'].values
+    adx = df['adx'].values
+    macro = df['macro_trend'].values
 
     N = len(closes)
     max_i = N - horizon_steps
@@ -300,11 +357,17 @@ def build_dataset_from_klines(df, seq_len, horizon_steps):
         curr_atr = float(atr[idx] / last) # Normalize ATR by price
         curr_stoch_k = float(stoch_k[idx])
         curr_stoch_d = float(stoch_d[idx])
+        
+        # Advanced indicators
+        dist_vwap = float((last - vwap[idx]) / last)
+        curr_adx = float(adx[idx])
+        curr_macro = float(macro[idx])
 
         X_list.append([
             last, mean, std, slope, momentum, vmean, ret, 
             curr_rsi, curr_macd, curr_macd_sig, dist_bb_up, dist_bb_low,
-            curr_atr, curr_stoch_k, curr_stoch_d
+            curr_atr, curr_stoch_k, curr_stoch_d,
+            dist_vwap, curr_adx, curr_macro
         ])
         Y_list.append(float(closes[i + horizon_steps - 1]))
         sample_times.append(df["close_time"].iloc[i])
@@ -444,15 +507,20 @@ def get_prediction(symbol_input, target_input):
     last_atr = float(df_with_ind.at[last_idx, 'atr'])
     last_stoch_k = float(df_with_ind.at[last_idx, 'stoch_k'])
     last_stoch_d = float(df_with_ind.at[last_idx, 'stoch_d'])
+    last_vwap = float(df_with_ind.at[last_idx, 'vwap'])
+    last_adx = float(df_with_ind.at[last_idx, 'adx'])
+    last_macro = float(df_with_ind.at[last_idx, 'macro_trend'])
     
     dist_bb_up = float((last_bb_up - last_last) / last_last)
     dist_bb_low = float((last_last - last_bb_low) / last_last)
     curr_atr = float(last_atr / last_last)
+    dist_vwap = float((last_last - last_vwap) / last_last)
     
     feat = np.array([
         last_last, last_mean, last_std, last_slope, last_momentum, last_vmean, last_ret,
         last_rsi, last_macd, last_macd_sig, dist_bb_up, dist_bb_low,
-        curr_atr, last_stoch_k, last_stoch_d
+        curr_atr, last_stoch_k, last_stoch_d,
+        dist_vwap, last_adx, last_macro
     ], dtype=float)
     
     # Scale inference features
@@ -462,7 +530,12 @@ def get_prediction(symbol_input, target_input):
     last_price = float(last_last)
     pct = (forecast_val / last_price - 1.0) * 100.0
     
-    feature_names = ["last","mean","std","slope","momentum","vol_mean","ret", "rsi", "macd", "macd_sig", "dist_bb_up", "dist_bb_low", "atr", "stoch_k", "stoch_d"]
+    feature_names = [
+        "last","mean","std","slope","momentum","vol_mean","ret", 
+        "rsi", "macd", "macd_sig", "dist_bb_up", "dist_bb_low", 
+        "atr", "stoch_k", "stoch_d",
+        "dist_vwap", "adx", "macro_trend"
+    ]
     beta_dict = {name: float(coef) for name, coef in zip(feature_names, b)}
 
     return {
