@@ -78,3 +78,45 @@ function formatPrice(price) {
         maximumFractionDigits: 6
     }).format(price);
 }
+
+// Live Price Ticker
+async function fetchLivePrices() {
+    try {
+        const response = await fetch('/api/live-prices');
+        const data = await response.json();
+
+        if (data.error) {
+            console.error('Error fetching prices:', data.error);
+            return;
+        }
+
+        const container = document.getElementById('priceTicker');
+        container.innerHTML = '';
+
+        // Create ticker items for each crypto
+        Object.entries(data).forEach(([symbol, info]) => {
+            const item = document.createElement('div');
+            item.className = 'ticker-item';
+
+            const changeClass = info.change_24h >= 0 ? 'positive' : 'negative';
+            const changeSign = info.change_24h >= 0 ? '+' : '';
+
+            item.innerHTML = `
+                <div class="ticker-symbol">${symbol}</div>
+                <div class="ticker-price">$${formatPrice(info.price)}</div>
+                <div class="ticker-change ${changeClass}">${changeSign}${info.change_24h.toFixed(2)}%</div>
+            `;
+
+            container.appendChild(item);
+        });
+
+    } catch (error) {
+        console.error('Failed to fetch live prices:', error);
+    }
+}
+
+// Fetch prices on page load
+fetchLivePrices();
+
+// Auto-refresh prices every 10 seconds
+setInterval(fetchLivePrices, 10000);

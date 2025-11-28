@@ -1,12 +1,42 @@
 from flask import Flask, render_template, request, jsonify
 import truthengine
 import traceback
+import requests
 
 app = Flask(__name__)
 
 @app.route('/')
 def index():
     return render_template('index.html')
+
+@app.route('/api/live-prices')
+def live_prices():
+    """Get live prices for top cryptocurrencies"""
+    try:
+        symbols = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT']
+        prices = {}
+        
+        for symbol in symbols:
+            url = f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}"
+            response = requests.get(url, timeout=5)
+            response.raise_for_status()
+            data = response.json()
+            
+            # Get 24h price change
+            ticker_url = f"https://api.binance.com/api/v3/ticker/24hr?symbol={symbol}"
+            ticker_response = requests.get(ticker_url, timeout=5)
+            ticker_data = ticker_response.json()
+            
+            coin = symbol.replace('USDT', '')
+            prices[coin] = {
+                'price': float(data['price']),
+                'change_24h': float(ticker_data['priceChangePercent'])
+            }
+        
+        return jsonify(prices)
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/predict', methods=['POST'])
 def predict():
